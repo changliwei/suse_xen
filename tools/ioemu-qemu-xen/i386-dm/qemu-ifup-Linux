@@ -1,0 +1,23 @@
+#!/bin/sh
+
+echo 'config qemu network with xen bridge for ' $*
+
+# If bridge is not specified, try device with default route.
+bridge=$2
+if [ -z "$bridge" ]; then
+    bridge=$(ip route list | awk '/^default / { print $NF }')
+fi
+
+# Exit if $bridge is not a bridge.  Exit with 0 status
+# so qemu-dm process is not terminated.  No networking in
+# vm is bad but not catastrophic.  The vm could still run
+# cpu and disk IO workloads.
+# Include an useful error message in qemu-dm log file.
+if [ ! -e "/sys/class/net/${bridge}/bridge" ]
+then
+   echo "WARNING! ${bridge} is not a bridge.  qemu-ifup exiting.  VM may not have a functioning networking stack."
+   exit 0
+fi
+
+ifconfig $1 0.0.0.0 up
+brctl addif $bridge $1 || true

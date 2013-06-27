@@ -1,0 +1,166 @@
+#!/bin/bash
+
+# pre-condition
+# 1. device is ready: logical volume activated if used
+# 2. device already initialized
+# 3. index is assigned correctly
+
+#error code:
+# 0: success
+# 1: error
+
+if [ `uname -m` = "x86_64" ]; then
+  SFEX_DAEMON=/usr/lib64/heartbeat/sfex_daemon
+else
+  SFEX_DAEMON=/usr/lib/heartbeat/sfex_daemon
+fi
+SFEX_INIT=/usr/sbin/sfex_init
+COLLISION_TIMEOUT=1
+LOCK_TIMEOUT=3
+MONITOR_INTERVAL=2
+LOCAL_LOCK_FILE=/var/lock/sfex
+
+usage() {
+  echo "usage: domain-lock-sfex [-l|-u|-s] -i <vm uuid> -x <sfex device>"
+  echo ""
+  echo "-l    lock"
+  echo "-u    unlock"
+  echo "-s    status (default)"
+  echo "-i    Virtual Machine Id or UUID"
+  echo "-x    SFEX device which used for sfex lock"
+  exit 1
+}
+
+get_lock_host() {
+  local rscname=$1
+  local device=$2
+  r=`$SFEX_DAEMON -s -u $rscname $device`
+  echo $r
+}
+
+get_status() {
+  local rscname=$1
+  if /usr/bin/pgrep -f "$SFEX_DAEMON .* ${rscname} " > /dev/null 2>&1; then
+	return 0
+  else
+    return 1
+  fi
+}
+
+acquire_lock() {
+  local rscname=$1
+  local device=$2
+  get_status $rscname
+  ## We assume xend will take care to avoid starting same VM twice on the same machine.
+  if [ $? -eq 0 ]; then
+    return 0
+  fi
+  $SFEX_DAEMON -c $COLLISION_TIMEOUT -t $LOCK_TIMEOUT -m $MONITOR_INTERVAL -u $rscname $device
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    return $rc
+  fi
+  sleep 4
+  get_status $rscname
+  if [ $? -eq 0 ]; then
+    return 0
+  fi
+  return 1
+}
+
+# release has to success
+release_lock(){
+  local rscname=$1
+
+  ## If the lock is already released
+  get_status $rscname
+  if [ $? -ne 0 ]; then
+	return 0
+  fi
+
+  pid=`/usr/bin/pgrep -f "$SFEX_DAEMON .* ${rscname} "`
+  /bin/kill $pid
+
+  count=0
+  while [ $count -lt 10 ]
+  do
+    get_status $rscname
+    if [ $? -eq 1 ]; then
+      return 0
+    fi
+    count=`expr $count + 1`
+    sleep 1
+  done
+
+  /bin/kill -9 $pid
+  while :
+  do
+    get_status $rscname
+    if [ $? -eq 1 ]; then
+      break;
+    fi
+    sleep 1
+  done
+
+  return 0
+}
+
+mode="status"
+
+while getopts ":lusn:i:p:x:" opt; do
+case $opt in
+l )
+mode="lock"
+;;
+u )
+mode="unlock"
+;;
+s )
+mode="status"
+;;
+n )
+vm_name=$OPTARG
+;;
+i )
+vm_uuid=$OPTARG
+;;
+p )
+vm_host=$OPTARG
+;;
+x )
+vm_sfex_device=$OPTARG
+;;
+\? )
+usage
+;;
+esac
+done
+
+shift $(($OPTIND - 1))
+[ -z $vm_uuid ] && usage
+[ -z $vm_sfex_device ] && usage
+
+case $mode in
+lock )
+  (
+  flock -x 200
+  acquire_lock $vm_uuid $vm_sfex_device
+  rc=$?
+  flock -u 200
+  exit $rc
+  ) 200>$LOCAL_LOCK_FILE-$vm_uuid
+;;
+unlock )
+  (
+  flock -x 200
+  release_lock $vm_uuid
+  rc=$?
+  flock -u 200
+  exit $rc
+  ) 200>$LOCAL_LOCK_FILE-$vm_uuid
+;;
+status )
+  get_lock_host $vm_uuid $vm_sfex_device
+;;
+esac
+

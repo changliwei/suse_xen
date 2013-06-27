@@ -1,0 +1,6 @@
+xen-vbd
+xen-platform-pci
+xen-vnif
+xenbus
+xen-balloon
+xen-scsi

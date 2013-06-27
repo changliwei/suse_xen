@@ -1,0 +1,43 @@
+
+This is a simple kexec-based boot loader
+========================================
+
+Files
+-----
+
+init		this is the /init script for the initramfs
+
+select-kernel	this script searches for bootable xen kernels
+		in a directory (/boot by default).
+
+mkinitramfs	this script generates a file list.  It can
+		be passed to CONFIG_INITRAMFS_SOURCE when
+		building a linux kernel.  That way you get
+		a linux kernel with the boot loader initramfs
+		compiled in.
+
+Usage
+-----
+
+The script gets it arguments from the kernel command line.
+You can use 'extra = "..."' in the domain config file to
+specify them.  It recognises the following arguments:
+
+root=<dev>	root filesystem (default: /dev/xvda1).
+boot=<dev>	/boot filesystem (default: none).
+kernel=<file>	kernel to boot.  If not specified the script
+		inspects /boot and presents a menu in case
+		multiple xen kernels are found.
+ramdisk=<file>	ramdisk (initrd) to boot.  If not specified
+		the script looks for one matching the kernel
+		file name.
+
+Any unknown arguments are passed through to the kexec'ed
+kernel.  Same goes for the root=<dev> argument.
+
+
+enjoy,
+  Gerd
+
+--
+Gerd Hoffmann <kraxel@suse.de>

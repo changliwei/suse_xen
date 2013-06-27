@@ -1,0 +1,309 @@
+#!/bin/sh
+
+
+########################################################################
+# messages
+
+function msg() {
+	local str="$*"
+	echo "### kboot: $str"
+}
+
+function dmsg() {
+	local str="$*"
+	test "$debug" = "" && return
+	echo "### kboot debug: $str"
+}
+
+function banner() {
+	local str="$*"
+	/bin/figlet -f /xen.flf "$str" >/dev/null
+}
+
+
+########################################################################
+# helper functions
+
+function init_storage_linux() {
+	# activate raid
+	if test -x /bin/mdrun && grep -q mdp /proc/devices; then
+		msg "raid support available, activating"
+		mdrun
+	fi
+
+	# activate lvm
+	if test -x /bin/lvm && grep -q device-mapper /proc/misc; then
+		msg "lvm support available, activating"
+		lvm vgscan --mknodes
+		lvm vgchange -a y
+		if test "$debug" != ""; then
+			dmsg "physical volumes"
+			lvm pvscan
+			dmsg "logical volumes"
+			lvm lvscan
+		fi
+	fi
+}
+
+function init_network_dhcp() {
+	if test -x /bin/dhcpcd -a -x /bin/ip &&\
+	   ip link ls 2>/dev/null | grep -q eth0; then
+		msg "network support available"
+		msg "activating eth0 using dhcp (15s max) ..."
+		dhcpcd -t 15 eth0
+		if test "$?" = "0"; then
+			eval "$(grep IPADDR /var/lib/dhcpcd/dhcpcd-eth0.info)"
+			echo "... worked ok: $IPADDR"
+		else
+			echo "... FAILED"
+		fi
+	fi
+}
+
+function try_mount() {
+	local dev="$1"
+	local dir="$2"
+
+	if mount | grep -q " ${dir} "; then
+		msg "$dir already mounted"
+		return 0
+	fi
+	if mount | grep -q "^${dev} "; then
+		msg "$dev already mounted"
+		return 0
+	fi
+	mount -t auto -o ro $dev $dir
+	if test "$?" = "0"; then
+		msg "mounted $dev at $dir"
+		return 0
+	else
+		msg "mounting $dev failed"
+		return 1
+	fi
+}
+
+function mount_root_boot() {
+	# mount filesystems
+	try_mount "$root" "/root"		|| return 1
+	if test "$boot" != ""; then
+		try_mount "$boot" "/root/boot"	|| return 1
+	fi
+}
+
+function linux_find_kernel() {
+	if test "$kernel" != ""; then
+		return
+	fi
+       	kernel="/boot/$(select-kernel /root/boot)"
+}
+
+function linux_find_ramdisk() {
+	if test "$ramdisk" != ""; then
+		return
+	fi
+
+	for file in \
+		/root${kernel//vmlinuz/initrd}		\
+		/root${kernel//vmlinuz/initrd}.gz	\
+		/root${kernel//vmlinuz/initrd}.img	\
+	; do
+		if test -f "$file"; then
+			ramdisk="${file#/root}"
+			break
+		fi
+	done
+	if test "$ramdisk" != ""; then
+		msg "no ramdisk specified, using $ramdisk"
+	fi
+}
+
+function solaris_find_kernel() {
+	local solaris=""
+
+	if test "$kernel" != ""; then
+		return
+	fi
+
+	case "$(uname -m)" in
+	x86_64)
+		solaris="/platform/i86xen/kernel/amd64/unix"
+		;;
+	i586 | i686)
+		solaris="/platform/i86xen/kernel/unix"
+		;;
+	esac
+
+	if test -f "/root$solaris"; then
+		kernel="$solaris"
+		ramdisk="/platform/i86pc/boot_archive"
+	fi
+}
+
+function netware_find_kernel() {
+	if test "$kernel" != ""; then
+		return
+	fi
+
+	for file in \
+		/nwserver/xnloader.sys \
+		/NWSERVER/XNLOADER.SYS \
+		/startup/xnloader.sys \
+		/STARTUP/XNLOADER.SYS \
+	; do
+		test -f "/root${file}" || continue
+		msg "netware loader found: $file"
+		kernel="$file"
+		break;
+	done
+}
+
+
+########################################################################
+# main
+
+# setup
+export PATH="/sbin:/bin"
+export PS1="kboot panic shell \w# "
+trap "echo; exec /bin/sh" EXIT
+
+# hello world
+exec < /dev/console > /dev/console 2>&1
+banner "xen mini kboot"
+
+# mount pseudo filesystems
+mount -v -t proc  proc  /proc
+mount -v -t sysfs sysfs /sys
+
+# defaults for arguments
+root="/dev/xvda1"		# root filesystem
+boot=""				# /boot filesystem (if present)
+kernel=""			# kernel to boot
+ramdisk=""			# ramdisk to boot
+debug=""                        # debug mode
+
+# parse arguments
+cmdline=""
+for cmd in $(cat /proc/cmdline); do
+	case "$cmd" in
+	root=*)
+		root="${cmd#root=}"
+		;;
+	boot=*)
+		boot="${cmd#boot=}"
+		;;
+	kernel=*)
+		kernel="${cmd#kernel=}"
+		;;
+	ramdisk=*)
+		ramdisk="${cmd#ramdisk=}"
+		;;
+	debug=*)
+		debug="${cmd#debug=}"
+		;;
+	*)
+		cmdline="$cmdline $cmd"
+		;;
+	esac
+done
+cmdline="$cmdline root=$root"
+
+# create block device nodes
+while read major minor blocks name; do
+	case "$name" in
+	xvd* | hd* | sd*)
+		dmsg "blkdev: /dev/$name, major $major, minor $minor"
+		mknod /dev/$name b $major $minor
+		;;
+	esac
+done < /proc/partitions
+
+# mount rootfs (and /boot if specified)
+mount_root_boot
+if test "$?" != "0"; then
+	msg "trying to activate raid and lvm first"
+	init_storage_linux;
+	mount_root_boot || exit 1
+fi
+
+# activate network device
+#     not (yet?) fetching kernels this way, this is
+#     only for testing network device handover ...
+init_network_dhcp;
+
+# figure rootfs type
+set -- $(mount | grep " /root ")
+rootfstype="$5"
+
+# find kernel if unspecified
+if test "${kernel}" = ""; then
+	case "$rootfstype" in
+	minix | ext2 | ext3 | reiserfs | xfs)
+		linux_find_kernel
+		;;
+	ufs)
+		solaris_find_kernel
+		;;
+	vfat)
+		netware_find_kernel
+		;;
+	*)
+		msg "no kernel location guess for fs \"$rootfstype\""
+		;;
+	esac
+fi
+if test ! -f "/root${kernel}"; then
+	msg "ERROR: kernel \"$kernel\" doesn't exist"
+	exit 1
+fi
+
+# OS tweaks
+case "$kernel" in
+*/xnloader.sys | */XNLOADER.SYS )
+	guestos="Netware"
+	ramdisk=""
+	cmdline=""
+	;;
+*/unix)
+	guestos="Solaris";
+	cmdline="$cmdline $kernel"
+	;;
+*linu[xz]*)
+	guestos="Linux"
+	linux_find_ramdisk
+	;;
+*)
+	guestos="Unknown"
+	;;
+esac
+
+# print configuration
+msg "using this boot configuration:"
+msg "   root   : $root"
+msg "   boot   : $boot"
+msg "   kernel : $kernel"
+msg "   ramdisk: $ramdisk"
+msg "   cmdline: $cmdline"
+
+# load kernel & ramdisk
+kexec="-l "
+if test "$debug" != ""; then
+	kexec="$kexec -d"
+	echo 9 > /proc/sysrq-trigger
+fi
+if test "$kernel" != ""; then
+	kexec="$kexec -k /root${kernel}"
+fi
+if test "$ramdisk" != ""; then
+	kexec="$kexec -i /root${ramdisk}"
+fi
+dmsg "run: xc_kexec $kexec -c \"${cmdline}\""
+xc_kexec $kexec -c "${cmdline}"	|| exit 1
+
+# cleanup
+msg "cleaning up"
+umount -av
+
+# go!
+msg "bye ..."
+banner "boot $guestos"
+xc_kexec -e

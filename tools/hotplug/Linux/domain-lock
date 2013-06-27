@@ -1,0 +1,83 @@
+#!/bin/bash
+
+basedir=$(dirname "$0")
+
+usage() {
+    echo "usage: domain-lock [-l|-u] -n <vm name> -i <vm uuid> -p <physical host> path"
+    echo "usage: domain-lock [-s] -i <vm uuid> path"
+    echo ""
+    echo "-l    lock"
+    echo "-u    unlock"
+    echo "-s    status (default)"
+    echo "-n    Virtual Machine name"
+    echo "-i    Virtual Machine Id or UUID"
+    echo "-p    Virtual Machine Server (physical host) name"
+    echo "path  A per-VM, unique location where external lock will be managed"
+    exit 1
+}
+
+remove_lock(){
+	local path=$1/lock
+	local name=$2
+
+	pid=`ps -efwww | grep vm-monitor | grep $name | awk '{print $2}'`
+	if [ -n "$pid" ]; then
+		kill $pid
+		rm -f $path
+	fi
+}
+
+get_status(){
+    local path=$1/lock
+    [ -f $path ] || exit 1
+
+    rc=`flock -xn $path /bin/true`
+    cat $path
+    exit $rc
+}
+
+mode="status"
+
+while getopts ":lusn:i:p:" opt; do
+    case $opt in
+        l )
+            mode="lock"
+            ;;
+	u )
+	    mode="unlock"
+	    ;;
+	s )
+            mode="status"
+            ;;
+	p )
+            vm_host=$OPTARG
+            ;;
+	n )
+            vm_name=$OPTARG
+            ;;
+	i )
+            vm_uuid=$OPTARG
+            ;;
+	\? )
+	    usage
+            ;;
+    esac
+done
+
+shift $(($OPTIND - 1))
+vm_path=$1
+
+case $mode in
+    lock )
+	[ -z "$vm_path" ] || [ -z "$vm_name" ] || [ -z "$vm_uuid" ] || [ -z "$vm_host" ] && usage
+	$basedir/set-lock $vm_path $vm_name $vm_uuid $vm_host
+        ;;
+    unlock )
+	[ -z "$vm_path" ] || [ -z "$vm_name" ] || [ -z "$vm_uuid" ] || [ -z "$vm_host" ] && usage
+        remove_lock $vm_path $vm_name $vm_uuid $vm_host
+        ;;
+    status )
+	[ -z "$vm_path" ] && usage
+        get_status $vm_path
+	;;
+esac

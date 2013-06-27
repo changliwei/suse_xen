@@ -1,0 +1,41 @@
+#!/bin/bash
+
+basedir=$(dirname "$0")
+HA_TICK=2
+
+monitor() {
+	local path=$1
+	local name=$2
+	local uuid=$3
+	local host=$4
+	local count=0
+	path=$path/lock
+
+    while :
+    do
+		echo "name=$name uuid=$uuid host=$host count=$count" > $path
+		count=$(($count+1))
+		sleep $HA_TICK
+    done&
+}
+
+create_lock() {
+	local path=$1/lock
+	local rc=0
+
+        [ -f $path ] || touch $path
+        flock -x -w $HA_TICK $path $basedir/vm-monitor $*
+	rc=$?
+	if [ $rc -eq 1 ]; then
+    		echo `cat $path`
+		exit 1
+	else
+		exit $rc
+	fi
+}
+
+if [ $0 = "$basedir/set-lock" ]; then
+	create_lock $*
+elif [ $0 = "$basedir/vm-monitor" ]; then
+	monitor $*
+fi

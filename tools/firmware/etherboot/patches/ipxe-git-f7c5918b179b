@@ -1,0 +1,61 @@
+
+Subject: [drivers] Fix warnings identified by gcc 4.5
+From: Bruce Rogers brogers@novell.com Fri Apr 2 18:16:38 2010 -0600
+Date: Fri Apr 16 07:32:49 2010 -0400:
+Git: f7c5918b179be57fc7f352cb33664eb43de02c30
+
+In building gpxe for openSUSE Factory (part of kvm package), there were
+a few problems identified by the compiler.  This patch addresses them.
+
+Signed-off-by: Bruce Rogers <brogers@novell.com>
+Signed-off-by: Stefan Hajnoczi <stefanha@gmail.com>
+Signed-off-by: Marty Connor <mdc@etherboot.org>
+
+diff --git a/src/drivers/net/ath5k/ath5k_qcu.c b/src/drivers/net/ath5k/ath5k_qcu.c
+index a674b85..cb25029 100644
+--- a/src/drivers/net/ath5k/ath5k_qcu.c
++++ b/src/drivers/net/ath5k/ath5k_qcu.c
+@@ -268,7 +268,7 @@ int ath5k_hw_reset_tx_queue(struct ath5k_hw *ah)
+ 		}
+
+ 		if (tq->tqi_ready_time &&
+-		(tq->tqi_type != AR5K_TX_QUEUE_ID_CAB))
++		(tq->tqi_type != AR5K_TX_QUEUE_CAB))
+ 			ath5k_hw_reg_write(ah, AR5K_REG_SM(tq->tqi_ready_time,
+ 				AR5K_QCU_RDYTIMECFG_INTVAL) |
+ 				AR5K_QCU_RDYTIMECFG_ENABLE,
+diff --git a/src/drivers/net/ns83820.c b/src/drivers/net/ns83820.c
+index 44d875f..c5f2153 100644
+--- a/src/drivers/net/ns83820.c
++++ b/src/drivers/net/ns83820.c
+@@ -687,7 +687,7 @@ static int ns83820_poll(struct nic *nic, int retrieve)
+ 	//			rx_ring[entry].link = 0;
+ 	rx_ring[entry].cmdsts = cpu_to_le32(CMDSTS_OWN);
+
+-	ns->cur_rx = ++ns->cur_rx % NR_RX_DESC;
++	ns->cur_rx = (ns->cur_rx + 1) % NR_RX_DESC;
+
+ 	if (ns->cur_rx == 0)	/* We have wrapped the ring */
+ 	  kick_rx();
+diff --git a/src/drivers/net/tulip.c b/src/drivers/net/tulip.c
+index e08e0d8..af30ec6 100644
+--- a/src/drivers/net/tulip.c
++++ b/src/drivers/net/tulip.c
+@@ -1171,7 +1171,7 @@ static int tulip_poll(struct nic *nic, int retrieve)
+     if (rx_ring[tp->cur_rx].status & 0x00008000) {
+ 	/* return the descriptor and buffer to receive ring */
+         rx_ring[tp->cur_rx].status = 0x80000000;
+-	tp->cur_rx = (++tp->cur_rx) % RX_RING_SIZE;
++	tp->cur_rx = (tp->cur_rx + 1) % RX_RING_SIZE;
+         return 0;
+     }
+
+@@ -1180,7 +1180,7 @@ static int tulip_poll(struct nic *nic, int retrieve)
+
+     /* return the descriptor and buffer to receive ring */
+     rx_ring[tp->cur_rx].status = 0x80000000;
+-    tp->cur_rx = (++tp->cur_rx) % RX_RING_SIZE;
++    tp->cur_rx = (tp->cur_rx + 1) % RX_RING_SIZE;
+
+     return 1;
+ }

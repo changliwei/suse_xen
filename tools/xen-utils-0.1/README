@@ -1,0 +1,10 @@
+/usr/sbin/xen-list is a C-based program that uses libxc directly to list
+running domains.  It provides better performance than 'xm list' since
+it runs natively and avoids xend locking.
+
+/usr/sbin/xen-destory is an alternative for 'xm destroy'.  It will forcibly
+destroy a domain even in cases where 'xm destroy' will not.  xen-destroy is
+useful for tools such as HAE Xen Agent.
+
+/usr/sbin/xen-vmresync is a executable python script. It can be used by PSO
+to resync VM status.

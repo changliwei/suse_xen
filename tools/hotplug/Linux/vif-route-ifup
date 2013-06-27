@@ -1,0 +1,34 @@
+#!/bin/bash
+#============================================================================
+# /etc/xen/vif-route-ifup
+#
+# Script for configuring a vif in routed mode.
+# The hotplugging system will call this script if it is specified either in
+# the device configuration given to Xend, or the default Xend configuration
+# in /etc/xen/xend-config.sxp.  If the script is specified in neither of those
+# places, then vif-bridge is the default.
+#
+# Usage:
+# vif-route-ifup (add|remove|online|offline)
+#
+# Environment vars:
+# dev         vif interface name (required).
+#============================================================================
+
+dir=$(dirname "$0")
+. "$dir/vif-common.sh"
+
+case "$command" in
+    online)
+        ifup ${dev}
+        ;;
+    offline)
+        do_without_error ifdown ${dev}
+        ;;
+esac
+
+log debug "Successful vif-route-ifup $command for ${dev}."
+if [ "$command" = "online" ]
+then
+  success
+fi

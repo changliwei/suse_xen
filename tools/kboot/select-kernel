@@ -1,0 +1,59 @@
+#!/bin/sh
+
+kdir="${1-/boot}"
+kunz="${TMPDIR-/tmp}/knl.$$"
+trap 'rm -f "$kunz"' EXIT
+
+function msg() {
+	local text="$*"
+	echo "### select-kernel: $text" >&2
+}
+
+# check kernels
+klist=""
+kcount="1"
+for kernel in $(ls -t $kdir/vmlinu[xz]* 2>/dev/null); do
+	msg "checking $kernel ..."
+	type="$(xc_kexec -t -k $kernel)"
+	case "$type" in
+		xen-3.0-x86_32 | xen-3.0-x86_32p | xen-3.0-x86_64)
+			# yes, this is a xen kernel
+			msg "... $type, ok"
+			klist="$klist ${kcount} ${kernel#$kdir/}"
+			eval "kernel${kcount}=${kernel#$kdir/}"
+			kcount=$(( $kcount + 1 ))
+			;;
+		*)
+			msg "... $type, ignore"
+			continue
+			;;
+	esac
+done
+if test "$kcount" = "1"; then
+	msg "no xen kernel found in $kdir"
+	exit 1
+fi
+
+if test "$kcount" = "2"; then
+	# only one kernel
+	msg "one xen kernel found in $kdir, using it"
+	kernelnr=1
+else
+	# present menu to pick kernel
+	export TERM=vt100
+	eval $(resize)
+	kernelnr=$(dialog --stdout --timeout 10 \
+		--menu "xen kboot -- kernel menu (10s timeout)" \
+		20 60 12 $klist)
+	clear >&2
+	if test "$kernelnr" = ""; then
+		# timeout, also quit via ESC, pick first then
+		kernelnr=1
+	fi
+fi
+
+# print result
+eval "kernelname=\${kernel$kernelnr}"
+msg "using $kernelname"
+echo "$kernelname"
+

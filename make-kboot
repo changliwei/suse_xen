@@ -1,0 +1,37 @@
+#!/bin/sh
+
+test -f .buildenv && source .buildenv
+set -ex
+
+# update tools
+make -C tools/libxc
+make -C tools/xcutils/helper
+make -C tools/xcutils
+make -C tools/kboot
+
+# update kernel
+ks=$(echo linux-2.6*-xenUboot)
+if test ! -d "$ks"; then
+	make CONFIGMODE=oldconfig linux-2.6-xenUboot-config
+	ks=$(echo linux-2.6*-xenUboot)
+fi
+if ! grep -q tools/kboot/kboot.initramfs $ks/.config; then
+	# fixup configuration if needed
+	src="$(pwd)/tools/kboot/kboot.initramfs"
+	sed -i.kboot					\
+		-e "/KEXEC/s|.*|CONFIG_KEXEC=y|"	\
+		-e "/INITRAMFS_SOURCE/s|=.*|=\"$src\"|" \
+		"$ks/.config"
+	make -C "$ks" oldconfig
+fi
+make -C "$ks"
+
+# copy boot loader
+cp $ks/vmlinuz ../kboot/vmlinuz-xen-kboot.${BTYPE-default}
+cp tools/kboot/README ../kboot/README.vmlinuz-xen-kboot
+
+# create assembler listings
+objdump -d $ks/vmlinux > vmlinux-xenUboot.asm
+objdump -dr tools/xcutils/helper/helper.elf > helper.asm
+objdump -t tools/xcutils/helper/helper.elf | grep ^0 | sort > helper.sym
+

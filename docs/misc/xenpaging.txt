@@ -1,0 +1,62 @@
+Warning:
+
+The xenpaging code is new and not fully debugged.
+
+Description:
+
+xenpaging writes memory pages of a given guest to a file and moves the
+pages back to the pool of available memory.  Once the guests wants to
+access the paged-out memory, the page is read from disk and placed into
+memory.  This allows the sum of all running guests to use more memory
+than physically available on the host.
+
+Usage:
+
+To enable xenpaging for a guest add the option 'actmem=' to the guests
+config file and run 'xm new <vm_config_file>' to make the changes
+active. actmem= takes the amount of memory in MB which a guest is
+allowed to use at a given time. Everything above this limit will be
+paged out. This paging is transparent to the guest.
+
+Example:
+ memory=4096
+ actmem=1024
+In this example a guest gets the impression it has 4GB of memory and
+the guest OS has to configure itself for this amount of memory. But
+xenpaging will page-out 3072MB, leaving only 1024MB active at a time.
+
+At runtime the configured value of actmem= can be changed with the "xm
+mem-swap-target" command.
+ xm mem-swap-target <domain_name> 512
+
+Additional cmdline options for the xenpaging binary can be specified
+with the xenpaging_extra= config file option:
+
+ xenpaging_extra=[ '-f', '/dev/shm/pagefile-guest_name', '-v' ]
+
+To get a list of available options, run /usr/lib/xen/bin/xenpaging -h:
+
+  xenpaging [options] -f <pagefile> -d <domain_id>
+
+options:
+ -d <domid>     --domain=<domid>         numerical domain_id of guest. This option is required.
+ -f <file>      --pagefile=<file>        pagefile to use. This option is required.
+ -m <max_memkb> --max_memkb=<max_memkb>  maximum amount of memory to handle.
+ -r <num>       --mru_size=<num>         number of paged-in pages to keep in memory.
+ -v             --verbose                enable debug output.
+ -h             --help                   this output.
+
+
+Caveats:
+Live migration with a paged guest does currently not work, the guest
+will crash once it starts on the target host. As a workaround stop
+paging before starting the migration:
+
+xm mem-swap-target <dom_name> 0 && xm migrate -l <dom_name> <remote_host>
+
+
+Todo:
+- implement/test live migration
+
+
+# vim: tw=72
